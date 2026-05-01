@@ -303,7 +303,7 @@ function App() {
   return (
     <div className="app">
       <div className="header">
-        <h1>My Running Log</h1>
+        <h1>🏃 My Running Log</h1>
         <div className="settings-wrapper">
           <button
             className="theme-toggle"
