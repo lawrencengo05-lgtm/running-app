@@ -677,3 +677,146 @@ h2 {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg-page);
+}
+
+.auth-box {
+  background: var(--bg-panel);
+  padding: 32px 28px;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-box h1 {
+  font-size: 24px;
+  margin: 0 0 4px;
+  text-align: center;
+}
+
+.auth-subtitle {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 0 0 24px;
+}
+
+.auth-box form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-box label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  color: var(--text-secondary);
+  gap: 4px;
+}
+
+.auth-box input {
+  padding: 9px 12px;
+  font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+}
+
+.auth-box input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.auth-box button[type="submit"] {
+  padding: 10px;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.auth-box button[type="submit"]:hover {
+  background: var(--accent-hover);
+}
+
+.auth-box button[type="submit"]:disabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.auth-error {
+  padding: 9px 12px;
+  background: rgba(255, 0, 0, 0.08);
+  border: 1px solid rgba(255, 0, 0, 0.2);
+  color: #c00;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+[data-theme="dark"] .auth-error {
+  background: rgba(255, 100, 100, 0.1);
+  color: #ff8a8a;
+}
+
+.auth-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: -4px 0 0;
+}
+
+.auth-link {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 20px 0 0;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.settings-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logout-button {
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.logout-button:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}

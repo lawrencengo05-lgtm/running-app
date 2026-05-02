@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
 import "./App.css";
 import Dashboard from "./Dashboard";
+import Auth from "./Auth";
 
 const API_URL = "https://hktnpan365.execute-api.us-east-1.amazonaws.com";
 const KM_TO_MI = 0.621371;
@@ -26,7 +28,22 @@ function formatPace(paceMinPerUnit) {
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
+async function authedFetch(url, options = {}) {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
 function App() {
+  const [authState, setAuthState] = useState("checking");
+  const [userEmail, setUserEmail] = useState("");
+
   const [runs, setRuns] = useState([]);
   const [form, setForm] = useState({ title: "", date: "", distance: "", duration: "", notes: "" });
   const [status, setStatus] = useState("");
@@ -37,12 +54,7 @@ function App() {
   const [plan, setPlan] = useState(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
-  const [generateForm, setGenerateForm] = useState({
-    goal: "",
-    weeks: 4,
-    daysPerWeek: 3,
-    currentFitness: ""
-  });
+  const [generateForm, setGenerateForm] = useState({ goal: "", weeks: 4, daysPerWeek: 3, currentFitness: "" });
 
   const [messages, setMessages] = useState([
     { role: "coach", text: "Hi! I'm your running coach. Ask me anything — about training, pacing, recovery, or just how you're feeling about your runs." }
@@ -56,7 +68,6 @@ function App() {
     if (saved) return saved;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
-
   const [unit, setUnit] = useState(() => localStorage.getItem("unit") || "km");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -70,9 +81,15 @@ function App() {
   }, [unit]);
 
   useEffect(() => {
-    fetchRuns();
-    fetchPlan();
+    checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (authState === "authenticated") {
+      fetchRuns();
+      fetchPlan();
+    }
+  }, [authState]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -88,20 +105,39 @@ function App() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, [settingsOpen]);
 
+  async function checkAuth() {
+    try {
+      const user = await getCurrentUser();
+      setUserEmail(user.signInDetails?.loginId || user.username);
+      setAuthState("authenticated");
+    } catch {
+      setAuthState("unauthenticated");
+    }
+  }
+
+  async function handleLogout() {
+    await signOut();
+    setAuthState("unauthenticated");
+    setUserEmail("");
+    setRuns([]);
+    setPlan(null);
+    setMessages([{ role: "coach", text: "Hi! I'm your running coach. Ask me anything — about training, pacing, recovery, or just how you're feeling about your runs." }]);
+    setSettingsOpen(false);
+  }
+
   async function fetchRuns() {
     try {
-      const res = await fetch(`${API_URL}/runs`);
+      const res = await authedFetch(`${API_URL}/runs`);
       const data = await res.json();
       setRuns(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Error fetching runs:", err);
-      setStatus("Could not load runs.");
     }
   }
 
   async function fetchPlan() {
     try {
-      const res = await fetch(`${API_URL}/plan`);
+      const res = await authedFetch(`${API_URL}/plan`);
       const data = await res.json();
       setPlan(data);
     } catch (err) {
@@ -113,18 +149,17 @@ function App() {
     e.preventDefault();
     setPlanLoading(true);
     try {
-      const res = await fetch(`${API_URL}/plan`, {
+      const res = await authedFetch(`${API_URL}/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...generateForm, unit })
       });
       if (res.ok) {
-        const data = await res.json();
-        setPlan(data);
+        setPlan(await res.json());
         setGenerateOpen(false);
         setGenerateForm({ goal: "", weeks: 4, daysPerWeek: 3, currentFitness: "" });
       } else {
-        alert("Could not generate plan. Try again in a moment.");
+        alert("Could not generate plan. Try again.");
       }
     } catch (err) {
       console.error("Error generating plan:", err);
@@ -136,19 +171,12 @@ function App() {
 
   async function toggleWorkout(workoutId, currentCompleted) {
     try {
-      const res = await fetch(`${API_URL}/plan/workout`, {
+      const res = await authedFetch(`${API_URL}/plan/workout`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planId: plan.planId,
-          workoutId,
-          completed: !currentCompleted
-        })
+        body: JSON.stringify({ planId: plan.planId, workoutId, completed: !currentCompleted })
       });
-      if (res.ok) {
-        const data = await res.json();
-        setPlan(data);
-      }
+      if (res.ok) setPlan(await res.json());
     } catch (err) {
       console.error("Error toggling workout:", err);
     }
@@ -157,10 +185,8 @@ function App() {
   async function deletePlan() {
     if (!confirm("Delete your training plan? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${API_URL}/plan`, { method: "DELETE" });
-      if (res.ok) {
-        setPlan(null);
-      }
+      const res = await authedFetch(`${API_URL}/plan`, { method: "DELETE" });
+      if (res.ok) setPlan(null);
     } catch (err) {
       console.error("Error deleting plan:", err);
     }
@@ -170,14 +196,12 @@ function App() {
     e.preventDefault();
     setLoading(true);
     setStatus("Saving...");
-
     try {
-      const res = await fetch(`${API_URL}/runs`, {
+      const res = await authedFetch(`${API_URL}/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form)
       });
-
       if (res.ok) {
         setStatus("Run saved!");
         setForm({ title: "", date: "", distance: "", duration: "", notes: "" });
@@ -196,11 +220,7 @@ function App() {
   function startEdit(run) {
     setEditingRunId(run.runId);
     setEditForm({
-      title: run.title || "",
-      date: run.date,
-      distance: run.distance,
-      duration: run.duration,
-      notes: run.notes || ""
+      title: run.title || "", date: run.date, distance: run.distance, duration: run.duration, notes: run.notes || ""
     });
   }
 
@@ -211,7 +231,7 @@ function App() {
 
   async function saveEdit(runId) {
     try {
-      const res = await fetch(`${API_URL}/runs/${encodeURIComponent(runId)}`, {
+      const res = await authedFetch(`${API_URL}/runs/${encodeURIComponent(runId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editForm)
@@ -231,14 +251,9 @@ function App() {
   async function deleteRun(runId) {
     if (!confirm("Delete this run? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${API_URL}/runs/${encodeURIComponent(runId)}`, {
-        method: "DELETE"
-      });
-      if (res.ok) {
-        fetchRuns();
-      } else {
-        alert("Could not delete run.");
-      }
+      const res = await authedFetch(`${API_URL}/runs/${encodeURIComponent(runId)}`, { method: "DELETE" });
+      if (res.ok) fetchRuns();
+      else alert("Could not delete run.");
     } catch (err) {
       console.error("Error deleting run:", err);
       alert("Error deleting run.");
@@ -248,19 +263,16 @@ function App() {
   async function handleCoachSubmit(e) {
     e.preventDefault();
     if (!coachInput.trim() || coachLoading) return;
-
     const userMessage = { role: "user", text: coachInput };
     setMessages(prev => [...prev, userMessage]);
     setCoachInput("");
     setCoachLoading(true);
-
     try {
-      const res = await fetch(`${API_URL}/coach`, {
+      const res = await authedFetch(`${API_URL}/coach`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userMessage.text })
       });
-
       if (res.ok) {
         const data = await res.json();
         setMessages(prev => [...prev, { role: "coach", text: data.reply }]);
@@ -279,6 +291,14 @@ function App() {
     setTheme(theme === "dark" ? "light" : "dark");
   }
 
+  if (authState === "checking") {
+    return <div className="auth-container"><div className="spinner"></div></div>;
+  }
+
+  if (authState === "unauthenticated") {
+    return <Auth onAuthSuccess={() => checkAuth()} />;
+  }
+
   const sortedRuns = [...runs].sort((a, b) => {
     if (a.date !== b.date) return b.date.localeCompare(a.date);
     return b.runId.localeCompare(a.runId);
@@ -288,10 +308,7 @@ function App() {
     if (editingRunId === run.runId) {
       return (
         <div key={run.runId} className="run-card editing">
-          <form
-            onSubmit={(e) => { e.preventDefault(); saveEdit(run.runId); }}
-            className="run-form"
-          >
+          <form onSubmit={(e) => { e.preventDefault(); saveEdit(run.runId); }} className="run-form">
             <label>Title<input type="text" value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></label>
             <label>Date<input type="date" required value={editForm.date} onChange={e => setEditForm({ ...editForm, date: e.target.value })} /></label>
             <label>Distance (km)<input type="text" required value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: e.target.value })} /></label>
@@ -322,18 +339,9 @@ function App() {
         </div>
         <div className="run-date-row">{run.date}</div>
         <div className="run-stats">
-          <div className="run-stat">
-            <div className="run-stat-label">Distance</div>
-            <div className="run-stat-value">{distanceDisplay.toFixed(2)} {unit}</div>
-          </div>
-          <div className="run-stat">
-            <div className="run-stat-label">Pace</div>
-            <div className="run-stat-value">{formatPace(paceMinPerUnit)}/{unit}</div>
-          </div>
-          <div className="run-stat">
-            <div className="run-stat-label">Time</div>
-            <div className="run-stat-value">{run.duration || "-"}</div>
-          </div>
+          <div className="run-stat"><div className="run-stat-label">Distance</div><div className="run-stat-value">{distanceDisplay.toFixed(2)} {unit}</div></div>
+          <div className="run-stat"><div className="run-stat-label">Pace</div><div className="run-stat-value">{formatPace(paceMinPerUnit)}/{unit}</div></div>
+          <div className="run-stat"><div className="run-stat-label">Time</div><div className="run-stat-value">{run.duration || "-"}</div></div>
         </div>
         {run.notes && <p className="run-notes">{run.notes}</p>}
       </div>
@@ -358,49 +366,12 @@ function App() {
         <section className="panel plan-panel">
           <h2>Generate Training Plan</h2>
           <form onSubmit={handleGeneratePlan} className="run-form">
-            <label>
-              Goal
-              <input
-                type="text"
-                placeholder="e.g. Run my first 5K"
-                required
-                value={generateForm.goal}
-                onChange={e => setGenerateForm({ ...generateForm, goal: e.target.value })}
-              />
-            </label>
+            <label>Goal<input type="text" placeholder="e.g. Run my first 5K" required value={generateForm.goal} onChange={e => setGenerateForm({ ...generateForm, goal: e.target.value })} /></label>
             <div className="plan-form-row">
-              <label>
-                Weeks
-                <input
-                  type="number"
-                  min="2"
-                  max="12"
-                  required
-                  value={generateForm.weeks}
-                  onChange={e => setGenerateForm({ ...generateForm, weeks: parseInt(e.target.value) || 4 })}
-                />
-              </label>
-              <label>
-                Days per week
-                <input
-                  type="number"
-                  min="2"
-                  max="6"
-                  required
-                  value={generateForm.daysPerWeek}
-                  onChange={e => setGenerateForm({ ...generateForm, daysPerWeek: parseInt(e.target.value) || 3 })}
-                />
-              </label>
+              <label>Weeks<input type="number" min="2" max="12" required value={generateForm.weeks} onChange={e => setGenerateForm({ ...generateForm, weeks: parseInt(e.target.value) || 4 })} /></label>
+              <label>Days per week<input type="number" min="2" max="6" required value={generateForm.daysPerWeek} onChange={e => setGenerateForm({ ...generateForm, daysPerWeek: parseInt(e.target.value) || 3 })} /></label>
             </div>
-            <label>
-              Current fitness (optional)
-              <textarea
-                placeholder="e.g. Beginner, can run 1km without stopping"
-                rows={2}
-                value={generateForm.currentFitness}
-                onChange={e => setGenerateForm({ ...generateForm, currentFitness: e.target.value })}
-              />
-            </label>
+            <label>Current fitness (optional)<textarea placeholder="e.g. Beginner, can run 1km without stopping" rows={2} value={generateForm.currentFitness} onChange={e => setGenerateForm({ ...generateForm, currentFitness: e.target.value })} /></label>
             <div className="edit-buttons">
               <button type="button" className="btn-secondary" onClick={() => setGenerateOpen(false)}>Cancel</button>
               <button type="submit">Generate</button>
@@ -415,18 +386,13 @@ function App() {
         <section className="panel plan-panel">
           <h2>Training Plan</h2>
           <p className="empty">No active plan. Let your AI coach build one tailored to your goal.</p>
-          <button className="btn-primary" onClick={() => setGenerateOpen(true)}>
-            Generate Plan
-          </button>
+          <button className="btn-primary" onClick={() => setGenerateOpen(true)}>Generate Plan</button>
         </section>
       );
     }
 
     const totalWorkouts = plan.weeks.reduce((sum, w) => sum + w.workouts.length, 0);
-    const completedCount = plan.weeks.reduce(
-      (sum, w) => sum + w.workouts.filter(wk => wk.completed).length,
-      0
-    );
+    const completedCount = plan.weeks.reduce((sum, w) => sum + w.workouts.filter(wk => wk.completed).length, 0);
     const progressPct = totalWorkouts > 0 ? Math.round((completedCount / totalWorkouts) * 100) : 0;
 
     return (
@@ -438,33 +404,19 @@ function App() {
           </div>
           <button className="run-action delete" onClick={deletePlan}>Delete plan</button>
         </div>
-
         <div className="plan-progress">
-          <div className="plan-progress-bar">
-            <div className="plan-progress-fill" style={{ width: `${progressPct}%` }}></div>
-          </div>
-          <div className="plan-progress-text">
-            {completedCount} of {totalWorkouts} workouts complete ({progressPct}%)
-          </div>
+          <div className="plan-progress-bar"><div className="plan-progress-fill" style={{ width: `${progressPct}%` }}></div></div>
+          <div className="plan-progress-text">{completedCount} of {totalWorkouts} workouts complete ({progressPct}%)</div>
         </div>
-
         {plan.weeks.map(week => (
           <div key={week.week} className="plan-week">
             <h3>Week {week.week}</h3>
             <div className="plan-workouts">
               {week.workouts.map(workout => (
-                <div
-                  key={workout.workoutId}
-                  className={`plan-workout type-${workout.type} ${workout.completed ? "completed" : ""}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={workout.completed}
-                    onChange={() => toggleWorkout(workout.workoutId, workout.completed)}
-                    className="workout-checkbox"
-                  />
+                <div key={workout.workoutId} className={`plan-workout type-${workout.type} ${workout.completed ? "completed" : ""}`}>
+                  <input type="checkbox" checked={workout.completed} onChange={() => toggleWorkout(workout.workoutId, workout.completed)} className="workout-checkbox" />
                   <div className="workout-content">
-                    <div className="workout-meta">
+                    <div class="workout-meta">
                       <span className="workout-day">{workout.day}</span>
                       <span className={`workout-type-badge type-${workout.type}`}>{workout.type}</span>
                     </div>
@@ -484,16 +436,16 @@ function App() {
       <div className="header">
         <h1>My Running Log</h1>
         <div className="settings-wrapper">
-          <button className="theme-toggle" onClick={() => setSettingsOpen(!settingsOpen)}>
-            ⚙ Settings
-          </button>
+          <button className="theme-toggle" onClick={() => setSettingsOpen(!settingsOpen)}>⚙ Settings</button>
           {settingsOpen && (
             <div className="settings-dropdown">
               <div className="settings-row">
+                <span>Signed in as</span>
+                <span className="settings-email">{userEmail}</span>
+              </div>
+              <div className="settings-row">
                 <span>Theme</span>
-                <button className="setting-pill" onClick={toggleTheme}>
-                  {theme === "dark" ? "☾ Dark" : "☀ Light"}
-                </button>
+                <button className="setting-pill" onClick={toggleTheme}>{theme === "dark" ? "☾ Dark" : "☀ Light"}</button>
               </div>
               <div className="settings-row">
                 <span>Units</span>
@@ -502,13 +454,15 @@ function App() {
                   <button className={`unit-option ${unit === "mi" ? "active" : ""}`} onClick={() => setUnit("mi")}>mi</button>
                 </div>
               </div>
+              <div className="settings-row">
+                <button className="logout-button" onClick={handleLogout}>Log out</button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
       {renderPlanPanel()}
-
       <Dashboard runs={runs} unit={unit} />
 
       <div className="layout">
@@ -522,15 +476,9 @@ function App() {
             <label>Notes<textarea placeholder="How did it feel?" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
             <button type="submit" disabled={loading}>{loading ? "Saving..." : "Log Run"}</button>
           </form>
-
           {status && <p className="status">{status}</p>}
-
           <h2>Past Runs ({runs.length})</h2>
-          {runs.length === 0 ? (
-            <p className="empty">No runs yet. Log your first one above!</p>
-          ) : (
-            <div className="runs-list">{sortedRuns.map(renderRunCard)}</div>
-          )}
+          {runs.length === 0 ? <p className="empty">No runs yet. Log your first one above!</p> : <div className="runs-list">{sortedRuns.map(renderRunCard)}</div>}
         </section>
 
         <section className="panel coach-panel">
@@ -542,15 +490,10 @@ function App() {
               </div>
             ))}
             {coachLoading && (
-              <div className="message coach">
-                <div className="message-bubble typing">
-                  <span></span><span></span><span></span>
-                </div>
-              </div>
+              <div className="message coach"><div className="message-bubble typing"><span></span><span></span><span></span></div></div>
             )}
             <div ref={messagesEndRef} />
           </div>
-
           <form onSubmit={handleCoachSubmit} className="coach-input-form">
             <input type="text" placeholder="Ask your coach..." value={coachInput} onChange={e => setCoachInput(e.target.value)} disabled={coachLoading} />
             <button type="submit" disabled={coachLoading || !coachInput.trim()}>Send</button>

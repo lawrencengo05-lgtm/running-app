@@ -1,17 +1,24 @@
-const { DynamoDBClient, PutItemCommand, QueryCommand, DeleteItemCommand, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBClient, PutItemCommand, QueryCommand, DeleteItemCommand } = require("@aws-sdk/client-dynamodb");
 const { marshall, unmarshall } = require("@aws-sdk/util-dynamodb");
 
 const client = new DynamoDBClient({ region: "us-east-1" });
 const RUNS_TABLE = "RunLogs";
 const PLANS_TABLE = "TrainingPlans";
-const DEMO_USER_ID = "user-001";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_MODEL = "claude-haiku-4-5";
+
+function getUserId(event) {
+  const userId = event.requestContext?.authorizer?.jwt?.claims?.sub;
+  if (!userId) {
+    throw new Error("Unauthorized: no user ID in token");
+  }
+  return userId;
+}
 
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Content-Type": "application/json"
   };
@@ -24,30 +31,32 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: "" };
     }
 
+    const userId = getUserId(event);
+
     if (method === "POST" && path.endsWith("/coach")) {
-      return await handleCoach(event, headers);
+      return await handleCoach(event, headers, userId);
     }
 
     if (method === "POST" && path.endsWith("/plan")) {
-      return await generatePlan(event, headers);
+      return await generatePlan(event, headers, userId);
     }
 
     if (method === "GET" && path.endsWith("/plan")) {
-      return await getPlan(headers);
+      return await getPlan(headers, userId);
     }
 
     if (method === "PATCH" && path.endsWith("/plan/workout")) {
-      return await toggleWorkout(event, headers);
+      return await toggleWorkout(event, headers, userId);
     }
 
     if (method === "DELETE" && path.endsWith("/plan")) {
-      return await deletePlan(headers);
+      return await deletePlan(headers, userId);
     }
 
     if (method === "POST" && path.endsWith("/runs")) {
       const body = JSON.parse(event.body);
       const item = {
-        userId: DEMO_USER_ID,
+        userId: userId,
         runId: new Date().toISOString(),
         title: body.title || "",
         date: body.date,
@@ -66,7 +75,7 @@ exports.handler = async (event) => {
       const runId = decodeURIComponent(path.split("/runs/")[1]);
       const body = JSON.parse(event.body);
       const item = {
-        userId: DEMO_USER_ID,
+        userId: userId,
         runId: runId,
         title: body.title || "",
         date: body.date,
@@ -85,7 +94,7 @@ exports.handler = async (event) => {
       const runId = decodeURIComponent(path.split("/runs/")[1]);
       await client.send(new DeleteItemCommand({
         TableName: RUNS_TABLE,
-        Key: marshall({ userId: DEMO_USER_ID, runId: runId })
+        Key: marshall({ userId: userId, runId: runId })
       }));
       return { statusCode: 200, headers, body: JSON.stringify({ message: "Run deleted!" }) };
     }
@@ -94,7 +103,7 @@ exports.handler = async (event) => {
       const result = await client.send(new QueryCommand({
         TableName: RUNS_TABLE,
         KeyConditionExpression: "userId = :uid",
-        ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID }),
+        ExpressionAttributeValues: marshall({ ":uid": userId }),
         ScanIndexForward: false
       }));
       const items = (result.Items || []).map(i => unmarshall(i));
@@ -108,7 +117,7 @@ exports.handler = async (event) => {
   }
 };
 
-async function handleCoach(event, headers) {
+async function handleCoach(event, headers, userId) {
   const body = JSON.parse(event.body);
   const userMessage = body.message;
 
@@ -119,7 +128,7 @@ async function handleCoach(event, headers) {
   const runsResult = await client.send(new QueryCommand({
     TableName: RUNS_TABLE,
     KeyConditionExpression: "userId = :uid",
-    ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID }),
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
     ScanIndexForward: false,
     Limit: 10
   }));
@@ -162,10 +171,10 @@ ${runsContext}`;
   return { statusCode: 200, headers, body: JSON.stringify({ reply, runsContextUsed: recentRuns.length }) };
 }
 
-async function generatePlan(event, headers) {
+async function generatePlan(event, headers, userId) {
   const body = JSON.parse(event.body);
   const { goal, weeks, daysPerWeek, currentFitness, unit } = body;
-  const unitLabel = unit === "mi" ? "miles" : "kilometers"; 
+  const unitLabel = unit === "mi" ? "miles" : "kilometers";
 
   if (!goal || !weeks || !daysPerWeek) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing required fields: goal, weeks, daysPerWeek" }) };
@@ -174,7 +183,7 @@ async function generatePlan(event, headers) {
   const runsResult = await client.send(new QueryCommand({
     TableName: RUNS_TABLE,
     KeyConditionExpression: "userId = :uid",
-    ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID }),
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
     ScanIndexForward: false,
     Limit: 30
   }));
@@ -194,7 +203,7 @@ async function generatePlan(event, headers) {
       : "unknown";
     const longestDistance = distances.length > 0 ? Math.max(...distances).toFixed(1) : "unknown";
 
-    runHistoryContext = "\n\nUser's recent run history (last " + recentRuns.length + " runs):\n" + summary + "\n\nQuick stats:\n- Average distance per run: " + avgDistance + " km\n- Longest run: " + longestDistance + " km\n- Total runs logged: " + recentRuns.length + "\n\nUse this real data to set the plan's starting difficulty and progression. Don't suggest paces or distances drastically out of line with what they're already doing. If they're already running 5K comfortably, don't start them at run/walk intervals.";
+    runHistoryContext = "\n\nUser's recent run history (last " + recentRuns.length + " runs):\n" + summary + "\n\nQuick stats:\n- Average distance per run: " + avgDistance + " km\n- Longest run: " + longestDistance + " km\n- Total runs logged: " + recentRuns.length + "\n\nUse this real data to set the plan's starting difficulty and progression. Don't suggest paces or distances drastically out of line with what they're already doing.";
   } else {
     runHistoryContext = "\n\nThe user hasn't logged any runs yet, so design a beginner-friendly plan starting from low intensity.";
   }
@@ -270,7 +279,7 @@ Rules:
 
   const planId = `plan-${new Date().toISOString()}`;
   const plan = {
-    userId: DEMO_USER_ID,
+    userId: userId,
     planId: planId,
     title: planData.title,
     goal: planData.goal,
@@ -284,7 +293,7 @@ Rules:
   const existing = await client.send(new QueryCommand({
     TableName: PLANS_TABLE,
     KeyConditionExpression: "userId = :uid",
-    ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID }),
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
     ProjectionExpression: "userId, planId"
   }));
 
@@ -307,11 +316,11 @@ Rules:
   return { statusCode: 201, headers, body: JSON.stringify(plan) };
 }
 
-async function getPlan(headers) {
+async function getPlan(headers, userId) {
   const result = await client.send(new QueryCommand({
     TableName: PLANS_TABLE,
     KeyConditionExpression: "userId = :uid",
-    ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID }),
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
     ScanIndexForward: false,
     Limit: 1
   }));
@@ -323,7 +332,7 @@ async function getPlan(headers) {
   return { statusCode: 200, headers, body: JSON.stringify(unmarshall(result.Items[0])) };
 }
 
-async function toggleWorkout(event, headers) {
+async function toggleWorkout(event, headers, userId) {
   const body = JSON.parse(event.body);
   const { planId, workoutId, completed } = body;
 
@@ -334,7 +343,7 @@ async function toggleWorkout(event, headers) {
   const result = await client.send(new QueryCommand({
     TableName: PLANS_TABLE,
     KeyConditionExpression: "userId = :uid AND planId = :pid",
-    ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID, ":pid": planId })
+    ExpressionAttributeValues: marshall({ ":uid": userId, ":pid": planId })
   }));
 
   if (!result.Items || result.Items.length === 0) {
@@ -367,11 +376,11 @@ async function toggleWorkout(event, headers) {
   return { statusCode: 200, headers, body: JSON.stringify(plan) };
 }
 
-async function deletePlan(headers) {
+async function deletePlan(headers, userId) {
   const existing = await client.send(new QueryCommand({
     TableName: PLANS_TABLE,
     KeyConditionExpression: "userId = :uid",
-    ExpressionAttributeValues: marshall({ ":uid": DEMO_USER_ID }),
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
     ProjectionExpression: "userId, planId"
   }));
 
