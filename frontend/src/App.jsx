@@ -116,7 +116,7 @@ function App() {
       const res = await fetch(`${API_URL}/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(generateForm)
+        body: JSON.stringify({ ...generateForm, unit })
       });
       if (res.ok) {
         const data = await res.json();
