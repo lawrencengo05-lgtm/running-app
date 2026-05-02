@@ -8,7 +8,11 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_MODEL = "claude-haiku-4-5";
 
 function getUserId(event) {
-  const userId = event.requestContext?.authorizer?.jwt?.claims?.sub;
+  console.log("requestContext:", JSON.stringify(event.requestContext, null, 2));
+  const userId =
+    event.requestContext?.authorizer?.jwt?.claims?.sub ||
+    event.requestContext?.authorizer?.claims?.sub ||
+    event.requestContext?.authorizer?.principalId;
   if (!userId) {
     throw new Error("Unauthorized: no user ID in token");
   }
