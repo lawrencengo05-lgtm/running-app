@@ -820,3 +820,22 @@ h2 {
   background: var(--bg-card);
   color: var(--text-primary);
 }
+.plan-context {
+  background: var(--bg-card);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px;
+  border-radius: 0 6px 6px 0;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.plan-context strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.plan-context-empty {
+  border-left-color: var(--text-muted);
+}

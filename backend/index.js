@@ -215,7 +215,7 @@ async function generatePlan(event, headers, userId) {
   const planSchemaPrompt = `You are a running coach creating a personalized training plan. Respond with ONLY valid JSON matching this exact schema, no other text or markdown:
 
 {
-  "title": "string - short plan title",
+  "title": "string - short plan title that briefly references the user's starting point if they have run history",
   "goal": "string - the user's goal",
   "weeks": [
     {
@@ -247,6 +247,8 @@ Rules:
 - Progress gradually week to week
 - Include rest/recovery appropriately
 - All distances in workout descriptions must be in ${unitLabel}
+- If the user has run history, reference their current ability in the plan title (e.g., "5K Plan from a 3K base" or "10K plan building from your weekly 5K runs")
+- The first week's workouts should be calibrated to their current average distance, not lower
 - Output ONLY the JSON object, no markdown fences, no commentary`;
 
   const claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {

@@ -192,15 +192,21 @@ function App() {
     }
   }
 
-  async function handleSubmit(e) {
+ async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setStatus("Saving...");
     try {
+      const distanceNum = parseFloat(form.distance);
+      const distanceInKm = unit === "mi" ? distanceNum / KM_TO_MI : distanceNum;
+      const submitData = {
+        ...form,
+        distance: `${distanceInKm.toFixed(2)} km`
+      };
       const res = await authedFetch(`${API_URL}/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+        body: JSON.stringify(submitData)
       });
       if (res.ok) {
         setStatus("Run saved!");
@@ -219,8 +225,10 @@ function App() {
 
   function startEdit(run) {
     setEditingRunId(run.runId);
+    const distanceKm = parseDistanceKm(run.distance);
+    const distanceDisplay = unit === "mi" ? (distanceKm * KM_TO_MI).toFixed(2) : distanceKm.toFixed(2);
     setEditForm({
-      title: run.title || "", date: run.date, distance: run.distance, duration: run.duration, notes: run.notes || ""
+      title: run.title || "", date: run.date, distance: distanceDisplay, duration: run.duration, notes: run.notes || ""
     });
   }
 
@@ -231,10 +239,16 @@ function App() {
 
   async function saveEdit(runId) {
     try {
+      const distanceNum = parseFloat(editForm.distance);
+      const distanceInKm = unit === "mi" ? distanceNum / KM_TO_MI : distanceNum;
+      const submitData = {
+        ...editForm,
+        distance: `${distanceInKm.toFixed(2)} km`
+      };
       const res = await authedFetch(`${API_URL}/runs/${encodeURIComponent(runId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editForm)
+        body: JSON.stringify(submitData)
       });
       if (res.ok) {
         setEditingRunId(null);
@@ -311,7 +325,7 @@ function App() {
           <form onSubmit={(e) => { e.preventDefault(); saveEdit(run.runId); }} className="run-form">
             <label>Title<input type="text" value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></label>
             <label>Date<input type="date" required value={editForm.date} onChange={e => setEditForm({ ...editForm, date: e.target.value })} /></label>
-            <label>Distance (km)<input type="text" required value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: e.target.value })} /></label>
+            <label>Distance ({unit})<input type="text" placeholder="e.g. 3.2" required value={form.distance} onChange={e => setForm({ ...form, distance: e.target.value })} /></label>
             <label>Duration<input type="text" required value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: e.target.value })} /></label>
             <label>Notes<textarea rows={3} value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} /></label>
             <div className="edit-buttons">
@@ -362,9 +376,28 @@ function App() {
     }
 
     if (generateOpen) {
+      const distances = runs
+        .map(r => parseDistanceKm(r.distance))
+        .filter(d => d > 0);
+      const avgDistance = distances.length > 0
+        ? (distances.reduce((a, b) => a + b, 0) / distances.length)
+        : 0;
+      const longestDistance = distances.length > 0 ? Math.max(...distances) : 0;
+      const avgDisplay = unit === "mi" ? (avgDistance * KM_TO_MI).toFixed(1) : avgDistance.toFixed(1);
+      const longestDisplay = unit === "mi" ? (longestDistance * KM_TO_MI).toFixed(1) : longestDistance.toFixed(1);
+
       return (
         <section className="panel plan-panel">
           <h2>Generate Training Plan</h2>
+          {runs.length > 0 ? (
+            <div className="plan-context">
+              <strong>Personalized for you:</strong> Based on your {runs.length} logged run{runs.length !== 1 ? "s" : ""} (avg {avgDisplay} {unit}, longest {longestDisplay} {unit}). Claude will calibrate the plan to your current ability.
+            </div>
+          ) : (
+            <div className="plan-context plan-context-empty">
+              <strong>No run history yet.</strong> Without logged runs, Claude will generate a beginner-friendly plan. For better personalization, log a few runs first.
+            </div>
+          )}
           <form onSubmit={handleGeneratePlan} className="run-form">
             <label>Goal<input type="text" placeholder="e.g. Run my first 5K" required value={generateForm.goal} onChange={e => setGenerateForm({ ...generateForm, goal: e.target.value })} /></label>
             <div className="plan-form-row">
@@ -471,7 +504,7 @@ function App() {
           <form onSubmit={handleSubmit} className="run-form">
             <label>Title (optional)<input type="text" placeholder="e.g. Morning recovery jog" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></label>
             <label>Date<input type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></label>
-            <label>Distance (km)<input type="text" placeholder="e.g. 3.2" required value={form.distance} onChange={e => setForm({ ...form, distance: e.target.value })} /></label>
+            <label>Distance ({unit})<input type="text" required value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: e.target.value })} /></label>
             <label>Duration<input type="text" placeholder="e.g. 28:45" required value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} /></label>
             <label>Notes<textarea placeholder="How did it feel?" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
             <button type="submit" disabled={loading}>{loading ? "Saving..." : "Log Run"}</button>
