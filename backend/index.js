@@ -6,6 +6,9 @@ const RUNS_TABLE = "RunLogs";
 const PLANS_TABLE = "TrainingPlans";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_MODEL = "claude-haiku-4-5";
+const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
+const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+const STRAVA_TABLE = "StravaTokens";
 
 function getUserId(event) {
   console.log("requestContext:", JSON.stringify(event.requestContext, null, 2));
@@ -36,6 +39,22 @@ exports.handler = async (event) => {
     }
 
     const userId = getUserId(event);
+    
+    if (method === "GET" && path.endsWith("/strava/auth-url")) {
+  return await getStravaAuthUrl(event, headers, userId);
+}
+
+if (method === "POST" && path.endsWith("/strava/exchange")) {
+  return await exchangeStravaCode(event, headers, userId);
+}
+
+if (method === "GET" && path.endsWith("/strava/status")) {
+  return await getStravaStatus(headers, userId);
+}
+
+if (method === "POST" && path.endsWith("/strava/sync")) {
+  return await syncStravaActivities(event, headers, userId);
+}
 
     if (method === "POST" && path.endsWith("/coach")) {
       return await handleCoach(event, headers, userId);
@@ -402,4 +421,216 @@ async function deletePlan(headers, userId) {
   }
 
   return { statusCode: 200, headers, body: JSON.stringify({ message: "Plan deleted" }) };
+}
+async function getStravaAuthUrl(event, headers, userId) {
+  const redirectUri = "http://localhost:5173/strava-callback";
+  const scope = "read,activity:read_all";
+  const state = userId;
+
+  const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${state}&approval_prompt=auto`;
+
+  return { statusCode: 200, headers, body: JSON.stringify({ authUrl }) };
+}
+
+async function exchangeStravaCode(event, headers, userId) {
+  const body = JSON.parse(event.body);
+  const { code } = body;
+
+  if (!code) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing code" }) };
+  }
+
+  const tokenResponse = await fetch("https://www.strava.com/api/v3/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: STRAVA_CLIENT_ID,
+      client_secret: STRAVA_CLIENT_SECRET,
+      code: code,
+      grant_type: "authorization_code"
+    })
+  });
+
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text();
+    console.error("Strava token exchange error:", errorText);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "Failed to exchange code with Strava" }) };
+  }
+
+  const tokens = await tokenResponse.json();
+
+  const item = {
+    userId: userId,
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: tokens.expires_at,
+    athleteId: tokens.athlete?.id?.toString() || "",
+    athleteName: tokens.athlete ? `${tokens.athlete.firstname} ${tokens.athlete.lastname}` : "",
+    connectedAt: new Date().toISOString()
+  };
+
+  await client.send(new PutItemCommand({
+    TableName: STRAVA_TABLE,
+    Item: marshall(item)
+  }));
+
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+      message: "Strava connected!",
+      athleteName: item.athleteName
+    })
+  };
+}
+
+async function getStravaStatus(headers, userId) {
+  const result = await client.send(new QueryCommand({
+    TableName: STRAVA_TABLE,
+    KeyConditionExpression: "userId = :uid",
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
+    Limit: 1
+  }));
+
+  if (!result.Items || result.Items.length === 0) {
+    return { statusCode: 200, headers, body: JSON.stringify({ connected: false }) };
+  }
+
+  const tokens = unmarshall(result.Items[0]);
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+      connected: true,
+      athleteName: tokens.athleteName,
+      connectedAt: tokens.connectedAt
+    })
+  };
+}
+
+async function refreshStravaToken(userId, currentTokens) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  if (currentTokens.expiresAt > nowSeconds + 60) {
+    return currentTokens.accessToken;
+  }
+
+  const refreshResponse = await fetch("https://www.strava.com/api/v3/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: STRAVA_CLIENT_ID,
+      client_secret: STRAVA_CLIENT_SECRET,
+      refresh_token: currentTokens.refreshToken,
+      grant_type: "refresh_token"
+    })
+  });
+
+  if (!refreshResponse.ok) {
+    throw new Error("Failed to refresh Strava token");
+  }
+
+  const newTokens = await refreshResponse.json();
+
+  const updatedItem = {
+    ...currentTokens,
+    accessToken: newTokens.access_token,
+    refreshToken: newTokens.refresh_token,
+    expiresAt: newTokens.expires_at
+  };
+
+  await client.send(new PutItemCommand({
+    TableName: STRAVA_TABLE,
+    Item: marshall(updatedItem)
+  }));
+
+  return newTokens.access_token;
+}
+
+async function syncStravaActivities(event, headers, userId) {
+  const tokenResult = await client.send(new QueryCommand({
+    TableName: STRAVA_TABLE,
+    KeyConditionExpression: "userId = :uid",
+    ExpressionAttributeValues: marshall({ ":uid": userId }),
+    Limit: 1
+  }));
+
+  if (!tokenResult.Items || tokenResult.Items.length === 0) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: "Strava not connected" }) };
+  }
+
+  const tokens = unmarshall(tokenResult.Items[0]);
+  const accessToken = await refreshStravaToken(userId, tokens);
+
+  const thirtyDaysAgo = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
+  const activitiesResponse = await fetch(
+    `https://www.strava.com/api/v3/athlete/activities?after=${thirtyDaysAgo}&per_page=50`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }
+  );
+
+  if (!activitiesResponse.ok) {
+    const errorText = await activitiesResponse.text();
+    console.error("Strava activities fetch error:", errorText);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "Failed to fetch activities from Strava" }) };
+  }
+
+  const activities = await activitiesResponse.json();
+  const runs = activities.filter(a => a.type === "Run" || a.sport_type === "Run");
+
+  const existingRunsResult = await client.send(new QueryCommand({
+    TableName: RUNS_TABLE,
+    KeyConditionExpression: "userId = :uid",
+    ExpressionAttributeValues: marshall({ ":uid": userId })
+  }));
+  const existingRuns = (existingRunsResult.Items || []).map(i => unmarshall(i));
+  const existingStravaIds = new Set(
+    existingRuns
+      .filter(r => r.stravaId)
+      .map(r => r.stravaId.toString())
+  );
+
+  let newCount = 0;
+  for (const activity of runs) {
+    const stravaIdStr = activity.id.toString();
+    if (existingStravaIds.has(stravaIdStr)) {
+      continue;
+    }
+
+    const distanceKm = (activity.distance / 1000).toFixed(2);
+    const totalSeconds = activity.moving_time;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const durationStr = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    const dateStr = activity.start_date_local.split("T")[0];
+
+    const item = {
+      userId: userId,
+      runId: new Date().toISOString() + "-" + stravaIdStr,
+      stravaId: stravaIdStr,
+      title: activity.name || "Strava run",
+      date: dateStr,
+      distance: `${distanceKm} km`,
+      duration: durationStr,
+      notes: "",
+      source: "strava"
+    };
+
+    await client.send(new PutItemCommand({
+      TableName: RUNS_TABLE,
+      Item: marshall(item)
+    }));
+    newCount++;
+  }
+
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+      message: `Synced ${newCount} new run${newCount !== 1 ? "s" : ""} from Strava`,
+      newCount,
+      totalActivitiesChecked: runs.length
+    })
+  };
 }

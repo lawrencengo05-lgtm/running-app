@@ -3,6 +3,7 @@ import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
 import "./App.css";
 import Dashboard from "./Dashboard";
 import Auth from "./Auth";
+import StravaCallback from "./StravaCallback";
 
 const API_URL = "https://hktnpan365.execute-api.us-east-1.amazonaws.com";
 const KM_TO_MI = 0.621371;
@@ -69,7 +70,9 @@ function App() {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
   const [unit, setUnit] = useState(() => localStorage.getItem("unit") || "km");
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem("activeTab") || "dashboard");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [stravaStatus, setStravaStatus] = useState({ connected: false });
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -81,6 +84,10 @@ function App() {
   }, [unit]);
 
   useEffect(() => {
+    localStorage.setItem("activeTab", activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
     checkAuth();
   }, []);
 
@@ -88,6 +95,7 @@ function App() {
     if (authState === "authenticated") {
       fetchRuns();
       fetchPlan();
+      fetchStravaStatus();
     }
   }, [authState]);
 
@@ -145,6 +153,49 @@ function App() {
     }
   }
 
+  async function fetchStravaStatus() {
+    try {
+      const res = await authedFetch(`${API_URL}/strava/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setStravaStatus(data);
+      }
+    } catch (err) {
+      console.error("Error fetching Strava status:", err);
+    }
+  }
+
+  async function connectStrava() {
+    try {
+      const res = await authedFetch(`${API_URL}/strava/auth-url`);
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = data.authUrl;
+      } else {
+        alert("Could not start Strava connection. Try again.");
+      }
+    } catch (err) {
+      console.error("Error starting Strava connection:", err);
+      alert("Error starting Strava connection.");
+    }
+  }
+
+  async function syncStrava() {
+    try {
+      const res = await authedFetch(`${API_URL}/strava/sync`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        alert(data.message);
+        fetchRuns();
+      } else {
+        alert("Sync failed. Try again.");
+      }
+    } catch (err) {
+      console.error("Error syncing Strava:", err);
+      alert("Sync error.");
+    }
+  }
+
   async function handleGeneratePlan(e) {
     e.preventDefault();
     setPlanLoading(true);
@@ -192,7 +243,7 @@ function App() {
     }
   }
 
- async function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setStatus("Saving...");
@@ -305,6 +356,10 @@ function App() {
     setTheme(theme === "dark" ? "light" : "dark");
   }
 
+  if (window.location.pathname === "/strava-callback") {
+    return <StravaCallback />;
+  }
+
   if (authState === "checking") {
     return <div className="auth-container"><div className="spinner"></div></div>;
   }
@@ -325,7 +380,7 @@ function App() {
           <form onSubmit={(e) => { e.preventDefault(); saveEdit(run.runId); }} className="run-form">
             <label>Title<input type="text" value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></label>
             <label>Date<input type="date" required value={editForm.date} onChange={e => setEditForm({ ...editForm, date: e.target.value })} /></label>
-            <label>Distance ({unit})<input type="text" placeholder="e.g. 3.2" required value={form.distance} onChange={e => setForm({ ...form, distance: e.target.value })} /></label>
+            <label>Distance ({unit})<input type="text" required value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: e.target.value })} /></label>
             <label>Duration<input type="text" required value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: e.target.value })} /></label>
             <label>Notes<textarea rows={3} value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} /></label>
             <div className="edit-buttons">
@@ -345,7 +400,10 @@ function App() {
     return (
       <div key={run.runId} className="run-card">
         <div className="run-card-header">
-          <div className="run-title">{run.title || "Untitled run"}</div>
+          <div className="run-title">
+            {run.title || "Untitled run"}
+            {run.source === "strava" && <span className="strava-badge">Strava</span>}
+          </div>
           <div className="run-card-actions">
             <button className="run-action" onClick={() => startEdit(run)}>Edit</button>
             <button className="run-action delete" onClick={() => deleteRun(run.runId)}>Delete</button>
@@ -449,7 +507,7 @@ function App() {
                 <div key={workout.workoutId} className={`plan-workout type-${workout.type} ${workout.completed ? "completed" : ""}`}>
                   <input type="checkbox" checked={workout.completed} onChange={() => toggleWorkout(workout.workoutId, workout.completed)} className="workout-checkbox" />
                   <div className="workout-content">
-                    <div class="workout-meta">
+                    <div className="workout-meta">
                       <span className="workout-day">{workout.day}</span>
                       <span className={`workout-type-badge type-${workout.type}`}>{workout.type}</span>
                     </div>
@@ -467,7 +525,7 @@ function App() {
   return (
     <div className="app">
       <div className="header">
-        <h1>My Running Log</h1>
+        <h1>DailyGrit</h1>
         <div className="settings-wrapper">
           <button className="theme-toggle" onClick={() => setSettingsOpen(!settingsOpen)}>⚙ Settings</button>
           {settingsOpen && (
@@ -488,6 +546,17 @@ function App() {
                 </div>
               </div>
               <div className="settings-row">
+                <span>Strava</span>
+                {stravaStatus.connected ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-end" }}>
+                    <span className="strava-connected">Connected as {stravaStatus.athleteName}</span>
+                    <button className="setting-pill" onClick={syncStrava}>Sync now</button>
+                  </div>
+                ) : (
+                  <button className="setting-pill" onClick={connectStrava}>Connect</button>
+                )}
+              </div>
+              <div className="settings-row">
                 <button className="logout-button" onClick={handleLogout}>Log out</button>
               </div>
             </div>
@@ -495,44 +564,61 @@ function App() {
         </div>
       </div>
 
-      {renderPlanPanel()}
-      <Dashboard runs={runs} unit={unit} />
-
-      <div className="layout">
-        <section className="panel">
-          <h2>Log a Run</h2>
-          <form onSubmit={handleSubmit} className="run-form">
-            <label>Title (optional)<input type="text" placeholder="e.g. Morning recovery jog" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></label>
-            <label>Date<input type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></label>
-            <label>Distance ({unit})<input type="text" required value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: e.target.value })} /></label>
-            <label>Duration<input type="text" placeholder="e.g. 28:45" required value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} /></label>
-            <label>Notes<textarea placeholder="How did it feel?" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
-            <button type="submit" disabled={loading}>{loading ? "Saving..." : "Log Run"}</button>
-          </form>
-          {status && <p className="status">{status}</p>}
-          <h2>Past Runs ({runs.length})</h2>
-          {runs.length === 0 ? <p className="empty">No runs yet. Log your first one above!</p> : <div className="runs-list">{sortedRuns.map(renderRunCard)}</div>}
-        </section>
-
-        <section className="panel coach-panel">
-          <h2>Coach</h2>
-          <div className="coach-messages">
-            {messages.map((m, i) => (
-              <div key={i} className={`message ${m.role}`}>
-                <div className="message-bubble">{m.text}</div>
-              </div>
-            ))}
-            {coachLoading && (
-              <div className="message coach"><div className="message-bubble typing"><span></span><span></span><span></span></div></div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-          <form onSubmit={handleCoachSubmit} className="coach-input-form">
-            <input type="text" placeholder="Ask your coach..." value={coachInput} onChange={e => setCoachInput(e.target.value)} disabled={coachLoading} />
-            <button type="submit" disabled={coachLoading || !coachInput.trim()}>Send</button>
-          </form>
-        </section>
+      <div className="tabs">
+        <button className={`tab ${activeTab === "dashboard" ? "active" : ""}`} onClick={() => setActiveTab("dashboard")}>Dashboard</button>
+        <button className={`tab ${activeTab === "stats" ? "active" : ""}`} onClick={() => setActiveTab("stats")}>Stats</button>
+        <button className={`tab ${activeTab === "pr" ? "active" : ""}`} onClick={() => setActiveTab("pr")}>Personal Best</button>
+        <button className={`tab ${activeTab === "runs" ? "active" : ""}`} onClick={() => setActiveTab("runs")}>Runs</button>
+        <button className={`tab ${activeTab === "coach" ? "active" : ""}`} onClick={() => setActiveTab("coach")}>Coach</button>
       </div>
+
+      {activeTab === "dashboard" && renderPlanPanel()}
+
+      {activeTab === "stats" && <Dashboard runs={runs} unit={unit} view="stats" />}
+
+      {activeTab === "pr" && <Dashboard runs={runs} unit={unit} view="pr" />}
+
+      {activeTab === "runs" && (
+        <div className="layout single">
+          <section className="panel">
+            <h2>Log a Run</h2>
+            <form onSubmit={handleSubmit} className="run-form">
+              <label>Title (optional)<input type="text" placeholder="e.g. Morning recovery jog" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></label>
+              <label>Date<input type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></label>
+              <label>Distance ({unit})<input type="text" placeholder="e.g. 3.2" required value={form.distance} onChange={e => setForm({ ...form, distance: e.target.value })} /></label>
+              <label>Duration<input type="text" placeholder="e.g. 28:45" required value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} /></label>
+              <label>Notes<textarea placeholder="How did it feel?" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+              <button type="submit" disabled={loading}>{loading ? "Saving..." : "Log Run"}</button>
+            </form>
+            {status && <p className="status">{status}</p>}
+            <h2>Past Runs ({runs.length})</h2>
+            {runs.length === 0 ? <p className="empty">No runs yet. Log your first one above!</p> : <div className="runs-list">{sortedRuns.map(renderRunCard)}</div>}
+          </section>
+        </div>
+      )}
+
+      {activeTab === "coach" && (
+        <div className="layout single">
+          <section className="panel coach-panel">
+            <h2>Coach</h2>
+            <div className="coach-messages">
+              {messages.map((m, i) => (
+                <div key={i} className={`message ${m.role}`}>
+                  <div className="message-bubble">{m.text}</div>
+                </div>
+              ))}
+              {coachLoading && (
+                <div className="message coach"><div className="message-bubble typing"><span></span><span></span><span></span></div></div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+            <form onSubmit={handleCoachSubmit} className="coach-input-form">
+              <input type="text" placeholder="Ask your coach..." value={coachInput} onChange={e => setCoachInput(e.target.value)} disabled={coachLoading} />
+              <button type="submit" disabled={coachLoading || !coachInput.trim()}>Send</button>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

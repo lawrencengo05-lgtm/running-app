@@ -40,12 +40,12 @@ const PR_BUCKETS = [
   { label: "10K+", min: 10, max: Infinity }
 ];
 
-function Dashboard({ runs, unit }) {
+function Dashboard({ runs, unit, view = "all" }) {
   if (!runs || runs.length === 0) {
     return (
       <section className="panel">
-        <h2>Stats</h2>
-        <p className="empty">Log a run to see your stats here.</p>
+        <h2>{view === "pr" ? "Personal Bests" : "Stats"}</h2>
+        <p className="empty">Log a run to see your data here.</p>
       </section>
     );
   }
@@ -88,6 +88,27 @@ function Dashboard({ runs, unit }) {
     return { label: bucket.label, pr: fastest };
   }).filter(b => b.pr !== null);
 
+  if (view === "pr") {
+    return (
+      <section className="panel dashboard">
+        <h2>Personal Bests</h2>
+        {prsByBucket.length === 0 ? (
+          <p className="empty">Log more runs to see your PRs.</p>
+        ) : (
+          <div className="pr-list">
+            {prsByBucket.map(b => (
+              <div key={b.label} className="pr-row">
+                <div className="pr-bucket">{b.label}</div>
+                <div className="pr-pace">{formatPace(b.pr.paceMinPerUnit)}/{unitLabel}</div>
+                <div className="pr-date">{b.pr.date}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="panel dashboard">
       <h2>Stats</h2>
@@ -121,20 +142,9 @@ function Dashboard({ runs, unit }) {
               <YAxis tick={{ fontSize: 11, fill: "var(--text-secondary)" }} unit={` ${unitLabel}`} />
               <Tooltip
                 formatter={(value) => `${value.toFixed(2)} ${unitLabel}`}
-                contentStyle={{
-                  background: "var(--bg-panel)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "6px",
-                  fontSize: "12px"
-                }}
+                contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12px" }}
               />
-              <Line
-                type="monotone"
-                dataKey="distanceDisplay"
-                stroke="var(--accent)"
-                strokeWidth={2}
-                dot={{ r: 4 }}
-              />
+              <Line type="monotone" dataKey="distanceDisplay" stroke="var(--accent)" strokeWidth={2} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -147,47 +157,15 @@ function Dashboard({ runs, unit }) {
             <LineChart data={sorted} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" />
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: "var(--text-secondary)" }} />
-              <YAxis
-                tick={{ fontSize: 11, fill: "var(--text-secondary)" }}
-                tickFormatter={v => formatPace(v)}
-                width={70}
-              />
+              <YAxis tick={{ fontSize: 11, fill: "var(--text-secondary)" }} tickFormatter={v => formatPace(v)} width={70} />
               <Tooltip
                 formatter={(value) => `${formatPace(value)}/${unitLabel}`}
-                contentStyle={{
-                  background: "var(--bg-panel)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "6px",
-                  fontSize: "12px"
-                }}
+                contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12px" }}
               />
-              <Line
-                type="monotone"
-                dataKey="paceMinPerUnit"
-                stroke="var(--accent)"
-                strokeWidth={2}
-                dot={{ r: 4 }}
-              />
+              <Line type="monotone" dataKey="paceMinPerUnit" stroke="var(--accent)" strokeWidth={2} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
-
-      <div className="chart-section">
-        <h3>Personal Bests</h3>
-        {prsByBucket.length === 0 ? (
-          <p className="empty">Log more runs to see your PRs.</p>
-        ) : (
-          <div className="pr-list">
-            {prsByBucket.map(b => (
-              <div key={b.label} className="pr-row">
-                <div className="pr-bucket">{b.label}</div>
-                <div className="pr-pace">{formatPace(b.pr.paceMinPerUnit)}/{unitLabel}</div>
-                <div className="pr-date">{b.pr.date}</div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </section>
   );
