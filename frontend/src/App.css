@@ -903,3 +903,211 @@ h2 {
   max-width: 800px;
   margin: 0 auto;
 }
+
+/* ============================================
+   MOBILE RESPONSIVE OVERRIDES
+   These rules only apply on narrow screens.
+   Desktop layout above is untouched.
+   ============================================ */
+
+/* Tablet and below (≤768px) */
+@media (max-width: 768px) {
+
+  /* Tighten outer container */
+  .app {
+    margin: 16px auto;
+    padding: 0 12px;
+  }
+
+  /* Smaller headings, less wasted space */
+  h1 {
+    font-size: 24px;
+  }
+
+  h2 {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+
+  /* Panels: less horizontal padding so content breathes */
+  .panel {
+    padding: 16px 14px;
+  }
+
+  /* Header: keep DailyGrit and Settings on one row but tighten */
+  .header {
+    margin-bottom: 16px;
+  }
+
+  /* Tabs: a touch smaller and tighter so more fit before scrolling */
+  .tab {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+
+  /* Settings dropdown: don't let it overflow off-screen */
+  .settings-dropdown {
+    min-width: 0;
+    width: calc(100vw - 24px);
+    max-width: 280px;
+    right: 0;
+  }
+
+  .settings-email {
+    max-width: 120px;
+  }
+
+  /* Coach panel: stop using a fixed 600px height — let it fill the screen */
+  .coach-panel {
+    height: calc(100vh - 220px);
+    min-height: 400px;
+  }
+
+  /* Plan form: stack Weeks and Days vertically */
+  .plan-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Plan header: stack title and Delete button */
+  .plan-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Run cards: keep 3 stats but tighten spacing */
+  .run-stats {
+    gap: 6px;
+  }
+
+  .run-stat-value {
+    font-size: 14px;
+  }
+
+  /* PR rows: bigger first column on small screens */
+  .pr-row {
+    grid-template-columns: 70px 1fr auto;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  /* Auth box: edge-to-edge feel on phones */
+  .auth-box {
+    padding: 24px 20px;
+  }
+}
+
+/* Phone (≤480px) — finer adjustments */
+@media (max-width: 480px) {
+
+  /* Even tighter outer padding */
+  .app {
+    padding: 0 10px;
+    margin: 12px auto;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  /* Panels: minimal padding to maximize content space */
+  .panel {
+    padding: 14px 12px;
+    border-radius: 8px;
+  }
+
+  /* Tabs: smallest comfortable size */
+  .tab {
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+
+  /* BIGGER TAP TARGETS — Apple recommends 44px minimum */
+
+  /* Run action buttons (Edit/Delete) — currently 3px 10px, way too small */
+  .run-action {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  /* Unit toggle pills */
+  .unit-option {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  /* Setting pills */
+  .setting-pill {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  /* Form inputs and buttons: bigger to be easy to tap */
+  .run-form input,
+  .run-form textarea,
+  .auth-box input,
+  .coach-input-form input {
+    padding: 11px 12px;
+    font-size: 16px; /* 16px prevents iOS zoom-on-focus */
+  }
+
+  .run-form button,
+  .coach-input-form button,
+  .btn-primary,
+  .auth-box button[type="submit"] {
+    padding: 12px 18px;
+    font-size: 15px;
+    min-height: 44px;
+  }
+
+  /* Workout checkbox: bigger and easier to tap */
+  .workout-checkbox {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* Theme/Settings button in header */
+  .theme-toggle {
+    padding: 10px 14px;
+    font-size: 13px;
+    min-height: 40px;
+  }
+
+  /* Run card layout: stack title and action buttons vertically when very narrow */
+  .run-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .run-card-actions {
+    align-self: flex-end;
+  }
+
+  /* Coach messages: slightly wider bubbles */
+  .message-bubble {
+    max-width: 90%;
+  }
+
+  /* Plan workouts: less padding */
+  .plan-workout {
+    padding: 10px 12px;
+  }
+
+  /* PR rows: stack the date below the bucket+pace */
+  .pr-row {
+    grid-template-columns: 60px 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .pr-date {
+    grid-column: 1 / -1;
+    font-size: 11px;
+  }
+}
+
+/* Smooth scrolling on touch devices */
+@media (hover: none) {
+  .coach-messages {
+    -webkit-overflow-scrolling: touch;
+  }
+}
